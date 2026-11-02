@@ -1,7 +1,7 @@
 
+import streamlit as st
 
-import random
-
+# 페이지 설정
 st.set_page_config(
     page_title="MBTI 책 & 영화 추천",
     page_icon="📚",
@@ -172,14 +172,17 @@ recommendations = {
     }
 }
 
+# 앱 제목
 st.title("📚 MBTI 책 & 영화 추천")
 st.write("내 성격에 어울리는 책과 로맨스 영화를 찾아보자! 💗")
 
+# MBTI 선택
 mbti = st.selectbox(
     "나의 MBTI를 선택해 줘!",
     ["선택하기"] + list(recommendations.keys())
 )
 
+# 추천 결과
 if mbti != "선택하기":
     data = recommendations[mbti]
 
