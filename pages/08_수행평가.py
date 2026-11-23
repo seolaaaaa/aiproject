@@ -2,99 +2,108 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+import re
 
-# =====================================
-# 1. 기본 페이지 설정
-# =====================================
 st.set_page_config(
-    page_title="지역별 전문대학 검색",
+    page_title="지역별 대학 검색",
     page_icon="🎓",
     layout="wide"
 )
 
-# =====================================
-# 2. 디자인 CSS
-# =====================================
 st.markdown("""
 <style>
-    .main-title {
-        text-align: center;
-        font-size: 38px;
-        font-weight: bold;
-        color: #243B64;
-        margin-bottom: 10px;
-    }
-
-    .sub-title {
-        text-align: center;
-        color: #777777;
-        font-size: 16px;
-        margin-bottom: 35px;
-    }
-
-    .result-title {
-        font-size: 25px;
-        font-weight: bold;
-        color: #243B64;
-        margin-top: 25px;
-        margin-bottom: 15px;
-    }
-
-    .university-card {
-        background-color: #F5F7FB;
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #E1E6EF;
-        margin-bottom: 15px;
-    }
-
-    .university-name {
-        font-size: 21px;
-        font-weight: bold;
-        color: #243B64;
-        margin-bottom: 12px;
-    }
-
-    .info {
-        font-size: 15px;
-        color: #444444;
-        line-height: 1.9;
-    }
+.block-container {
+    padding-top: 2rem;
+    max-width: 1100px;
+}
+.hero {
+    background: linear-gradient(120deg, #eaf2ff, #f7f9ff);
+    padding: 28px;
+    border-radius: 18px;
+    text-align: center;
+    border: 1px solid #dce7f8;
+    margin-bottom: 24px;
+}
+.hero h1 {
+    color: #203864;
+    margin: 0;
+    font-size: 32px;
+}
+.hero p {
+    color: #53657f;
+    margin-top: 10px;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
-# =====================================
-# 3. 대학 데이터 불러오기
-# =====================================
+# 지역명 정리 함수
+def normalize_text(value):
+    return re.sub(
+        r"[^가-힣a-zA-Z0-9]",
+        "",
+        str(value)
+    ).lower()
+
+
+# CSV 파일 위치
+DATA_PATH = Path(__file__).resolve().parent / "universities.csv"
+
+
+# 대학 자료 불러오기
 @st.cache_data
-def load_data():
+def load_universities(path):
 
-    file_path = Path(__file__).parent / "universities.csv"
+    data = None
 
-    data = pd.read_csv(
-        file_path,
-        encoding="utf-8-sig",
-        dtype=str
-    )
+    for encoding in ["utf-8-sig", "cp949", "euc-kr"]:
+        try:
+            data = pd.read_csv(
+                path,
+                encoding=encoding,
+                dtype=str
+            )
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if data is None:
+        raise ValueError("CSV 인코딩을 확인해주세요.")
+
+    data.columns = [
+        str(col).replace("\ufeff", "").strip()
+        for col in data.columns
+    ]
 
     data = data.fillna("")
+
+    required = ["대학명", "지역", "주소"]
+
+    missing = [
+        col for col in required
+        if col not in data.columns
+    ]
+
+    if missing:
+        raise ValueError(
+            f"필요한 열이 없습니다: {missing}"
+        )
+
+    for col in [
+        "영문명", "홈페이지", "전화",
+        "팩스", "대표메일"
+    ]:
+        if col not in data.columns:
+            data[col] = ""
+
+    data["_지역검색"] = data["지역"].map(normalize_text)
+    data["_주소검색"] = data["주소"].map(normalize_text)
 
     return data
 
 
-try:
-    df = load_data()
-
-except FileNotFoundError:
-    st.error("universities.csv 파일을 찾을 수 없습니다.")
-    st.stop()
-
-
-# =====================================
-# 4. 지역명 변환
-# =====================================
-region_alias = {
+# 지역명 별칭
+REGION_ALIASES = {
     "서울특별시": "서울",
     "서울시": "서울",
     "부산광역시": "부산",
@@ -126,26 +135,34 @@ region_alias = {
 }
 
 
-# =====================================
-# 5. 사이트 제목
-# =====================================
-st.markdown(
-    '<div class="main-title">🎓 지역별 전문대학 검색</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    '<div class="sub-title">'
-    '원하는 지역을 검색하고 해당 지역의 전문대학 정보를 확인하세요.'
-    '</div>',
-    unsafe_allow_html=True
-)
+# 제목
+st.markdown("""
+<div class="hero">
+    <h1>🎓 지역별 대학 검색</h1>
+    <p>원하는 지역을 검색하고 해당 지역의 대학 정보를 확인하세요.</p>
+</div>
+""", unsafe_allow_html=True)
 
 
-# =====================================
-# 6. 검색창
-# =====================================
-st.markdown("### 🔎 지역 검색")
+# 데이터 확인
+if not DATA_PATH.exists():
+    st.error("universities.csv 파일이 없습니다.")
+    st.info(
+        "GitHub에서 app.py와 universities.csv를 "
+        "같은 폴더에 업로드해주세요."
+    )
+    st.stop()
+
+try:
+    df = load_universities(DATA_PATH)
+
+except Exception as error:
+    st.error(f"데이터 오류: {error}")
+    st.stop()
+
+
+# 검색창
+st.subheader("🔎 지역 검색")
 
 with st.form("search_form"):
 
@@ -160,141 +177,161 @@ with st.form("search_form"):
     )
 
 
-# =====================================
-# 7. 검색 기능
-# =====================================
+# 검색 기능
 if search_button:
 
-    keyword = search_region.strip().replace(" ", "")
+    keyword = search_region.strip()
 
-    if keyword == "":
-        st.session_state["results"] = None
-        st.warning("검색할 지역을 입력해주세요.")
+    if not keyword:
+
+        st.session_state["search_done"] = False
+        st.warning("지역을 입력해주세요.")
 
     else:
 
-        # 정식 지역명을 데이터의 지역명으로 변환
-        region = region_alias.get(keyword, keyword)
+        region = REGION_ALIASES.get(
+            keyword,
+            keyword
+        )
 
-        # 대학 데이터에서 해당 지역 검색
+        normalized_region = normalize_text(region)
+        normalized_keyword = normalize_text(keyword)
+
+        # 지역 열 검색
+        region_match = (
+            df["_지역검색"] == normalized_region
+        )
+
+        # 주소 열 검색
+        address_match = (
+            df["_주소검색"].str.contains(
+                normalized_region,
+                regex=False,
+                na=False
+            )
+        ) | (
+            df["_주소검색"].str.contains(
+                normalized_keyword,
+                regex=False,
+                na=False
+            )
+        )
+
+        # 두 검색 결과 합치기
         results = df[
-            df["지역"].str.strip() == region
-        ]
+            region_match | address_match
+        ].copy()
 
-        if len(results) > 0:
+        results = results.drop_duplicates(
+            subset=["대학명", "주소"]
+        )
 
-            st.session_state["results"] = results.to_dict("records")
-            st.session_state["searched_region"] = region
-
-        else:
-
-            st.session_state["results"] = []
-            st.session_state["searched_region"] = keyword
+        st.session_state["search_done"] = True
+        st.session_state["searched_region"] = keyword
+        st.session_state["results"] = results.to_dict("records")
 
 
-# =====================================
-# 8. 검색 결과 출력 창
-# =====================================
-st.markdown(
-    '<div class="result-title">📋 검색 결과</div>',
-    unsafe_allow_html=True
-)
+# 검색 결과 창
+st.divider()
+st.subheader("📋 검색 결과")
 
-if "results" not in st.session_state:
+if not st.session_state.get("search_done", False):
 
-    st.info("지역을 검색하면 해당 지역의 전문대학이 표시됩니다.")
-
-elif st.session_state["results"] is None:
-
-    st.info("지역명을 입력한 뒤 다시 검색해주세요.")
-
-elif len(st.session_state["results"]) == 0:
-
-    st.warning(
-        f"'{st.session_state['searched_region']}' 지역의 대학을 찾지 못했습니다."
-    )
-
-    st.write("검색 가능한 지역")
-
-    st.write(
-        ", ".join(sorted(df["지역"].unique()))
-    )
+    st.info("지역을 입력하면 대학 목록이 표시됩니다.")
 
 else:
 
-    results = pd.DataFrame(st.session_state["results"])
-
-    region = st.session_state["searched_region"]
-
-    st.success(
-        f"'{region}' 지역 검색 완료! "
-        f"총 {len(results)}개의 전문대학을 찾았습니다."
+    results = pd.DataFrame(
+        st.session_state.get("results", [])
     )
 
-    # 대학별 정보 카드
-    for index, row in results.iterrows():
+    searched = st.session_state["searched_region"]
 
-        with st.container(border=True):
+    if results.empty:
 
-            st.markdown(
-                f'<div class="university-name">'
-                f'🎓 {row["대학명"]}'
-                f'</div>',
-                unsafe_allow_html=True
-            )
+        st.warning(
+            f"'{searched}' 지역의 대학을 찾지 못했습니다."
+        )
 
-            st.markdown(
-                f"""
-                <div class="info">
-                📍 <b>지역:</b> {row['지역']}<br>
-                🏫 <b>주소:</b> {row['주소']}<br>
-                ☎️ <b>전화번호:</b> {row['전화']}<br>
-                📠 <b>팩스:</b> {row['팩스']}<br>
-                ✉️ <b>대표메일:</b> {row['대표메일']}<br>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+    else:
 
-            website = row["홈페이지"].strip()
+        st.success(
+            f"'{searched}' 검색 결과: "
+            f"총 {len(results)}개 대학"
+        )
 
-            if website:
+        # 대학별 카드 출력
+        for _, row in results.iterrows():
 
-                if not website.startswith(("http://", "https://")):
-                    website = "https://" + website
+            with st.container(border=True):
 
-                st.link_button(
-                    "🌐 대학 홈페이지 바로가기",
-                    website
+                st.markdown(
+                    f"### 🎓 {row['대학명']}"
                 )
 
-    # 검색 결과 다운로드
-    st.divider()
+                col1, col2 = st.columns(2)
 
-    csv_data = results.to_csv(
-        index=False
-    ).encode("utf-8-sig")
+                with col1:
+                    st.write(f"**지역:** {row['지역']}")
+                    st.write(f"**주소:** {row['주소']}")
+                    st.write(f"**전화:** {row['전화']}")
 
-    st.download_button(
-        label="📥 검색 결과 다운로드",
-        data=csv_data,
-        file_name=f"{region}_전문대학_목록.csv",
-        mime="text/csv",
-        use_container_width=True
+                with col2:
+                    st.write(f"**영문명:** {row['영문명']}")
+                    st.write(f"**팩스:** {row['팩스']}")
+                    st.write(f"**대표메일:** {row['대표메일']}")
+
+                website = str(row["홈페이지"]).strip()
+
+                if website:
+
+                    if not website.startswith(
+                        ("http://", "https://")
+                    ):
+                        website = "https://" + website
+
+                    st.link_button(
+                        "🌐 대학 홈페이지 바로가기",
+                        website
+                    )
+
+        # CSV 다운로드
+        download_data = results.drop(
+            columns=[
+                "_지역검색",
+                "_주소검색"
+            ],
+            errors="ignore"
+        )
+
+        st.download_button(
+            "📥 검색 결과 다운로드",
+            data=download_data.to_csv(
+                index=False
+            ).encode("utf-8-sig"),
+            file_name=f"{searched}_대학목록.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+
+# 자료 안내
+with st.expander("📌 자료 안내"):
+
+    st.write(
+        "한국전문대학교육협의회 대학 정보 "
+        "(2020년 10월 7일 기준)"
     )
 
-
-# =====================================
-# 9. 하단 안내
-# =====================================
-st.divider()
-
-st.caption(
-    "자료 출처: 한국전문대학교육협의회 대학 정보 (2020.10.07)"
-)
+    st.write(
+        "이 데이터는 전문대학 자료입니다. "
+        "일반 4년제 대학은 별도의 데이터가 필요합니다."
+    )
 
 st.caption(
-    "※ 대학 정보는 자료 작성일 기준이며, "
-    "최신 정보는 각 대학 공식 홈페이지에서 확인하세요."
+    "자료 출처: 한국전문대학교육협의회 대학 정보 CSV"
 )
 
+
+
+                
