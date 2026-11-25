@@ -21,50 +21,46 @@ st.write("지역을 검색하면 해당 지역의 대학교 2곳을 보여줍니
 @st.cache_data
 def load_data():
 
-    file_path = Path(__file__).parent / "universities.csv"
+    # pages 폴더의 상위 폴더에서 CSV 찾기
+    file_path = (
+        Path(__file__).resolve().parent.parent
+        / "universities.csv"
+    )
 
     if not file_path.exists():
         raise FileNotFoundError(
-            "universities.csv 파일이 없습니다. "
-            "app.py와 같은 폴더에 업로드해 주세요."
+            f"CSV 파일을 찾을 수 없습니다: {file_path}"
         )
 
-    # 여러 인코딩 자동 시도
     encodings = ["utf-8-sig", "utf-8", "cp949"]
 
     df = None
-    last_error = None
+    errors = []
 
     for encoding in encodings:
         try:
             df = pd.read_csv(
                 file_path,
-                encoding=encoding,
-                sep=None,
-                engine="python"
+                encoding=encoding
             )
             break
         except Exception as e:
-            last_error = e
+            errors.append(str(e))
 
     if df is None:
-        raise ValueError(f"CSV 읽기 실패: {last_error}")
+        raise ValueError(
+            "CSV 파일을 읽지 못했습니다: " + str(errors)
+        )
 
-    # 컬럼명 자동 정리
+    # 컬럼명 정리
     df.columns = (
-        df.columns
-        .astype(str)
+        df.columns.astype(str)
         .str.replace("\ufeff", "", regex=False)
         .str.strip()
+        .str.replace(" ", "", regex=False)
     )
 
-    # 컬럼명 공백 제거
-    df.columns = df.columns.str.replace(
-        " ", "", regex=False
-    )
-
-    # 필수 컬럼 확인
-    required = [
+    required_columns = [
         "학교명",
         "대학구분명",
         "설립형태구분명",
@@ -72,14 +68,14 @@ def load_data():
     ]
 
     missing = [
-        col for col in required
+        col for col in required_columns
         if col not in df.columns
     ]
 
     if missing:
         raise ValueError(
-            f"필수 컬럼이 없습니다: {missing}\n"
-            f"현재 CSV 컬럼: {list(df.columns)}"
+            f"필수 컬럼 누락: {missing}\n"
+            f"실제 컬럼: {list(df.columns)}"
         )
 
     return df
@@ -87,71 +83,90 @@ def load_data():
 
 try:
     df = load_data()
-
     st.success(
-        f"데이터 불러오기 성공! 총 {len(df):,}개 데이터"
+        f"데이터 불러오기 성공! 총 {len(df):,}개"
     )
 
 except Exception as e:
-    st.error(f"데이터를 불러오지 못했습니다: {e}")
+    st.error(f"데이터 오류: {e}")
     st.stop()
 
 
 # =========================
 # 3. 데이터 전처리
 # =========================
-df["학교명"] = df["학교명"].fillna("").astype(str).str.strip()
-df["시도명"] = df["시도명"].fillna("").astype(str).str.strip()
+
+df["학교명"] = (
+    df["학교명"].fillna("").astype(str).str.strip()
+)
+
+df["시도명"] = (
+    df["시도명"].fillna("").astype(str).str.strip()
+)
 
 # 대학 및 전문대학만 추출
 university_df = df[
     df["대학구분명"].isin(["대학", "전문대학"])
 ].copy()
 
-# 학교명 없는 데이터 제거
+# 학교명이 없는 행 제거
 university_df = university_df[
     university_df["학교명"] != ""
 ]
 
-# 같은 학교 중복 제거
+# 중복 학교 제거
 university_df = university_df.drop_duplicates(
     subset=["학교명"],
     keep="first"
-).reset_index(drop=True)
+)
+
+university_df = university_df.reset_index(drop=True)
 
 
 # =========================
 # 4. 데이터 현황
 # =========================
+
 st.divider()
 st.subheader("📊 대학 데이터 현황")
 
 col1, col2, col3 = st.columns(3)
 
-col1.metric("전체 데이터", f"{len(df):,}개")
-col2.metric("대학 데이터", f"{len(university_df):,}개")
-col3.metric("지역 수", f"{university_df['시도명'].nunique()}개")
+col1.metric(
+    "전체 데이터",
+    f"{len(df):,}개"
+)
+
+col2.metric(
+    "대학 및 전문대학",
+    f"{len(university_df):,}개"
+)
+
+col3.metric(
+    "지역 수",
+    f"{university_df['시도명'].nunique()}개"
+)
 
 
 # =========================
-# 5. 지역별 대학 검색
+# 5. 지역 검색
 # =========================
+
 st.divider()
 st.subheader("🔍 지역별 대학교 검색")
 
 search_region = st.text_input(
     "검색할 지역을 입력하세요",
-    placeholder="예: 서울, 경기, 부산, 대전"
+    placeholder="예: 서울, 부산, 대전, 경기"
 ).strip()
 
 if search_region:
 
-    # 지역명 검색
     result = university_df[
         university_df["시도명"].str.contains(
             search_region,
-            na=False,
             case=False,
+            na=False,
             regex=False
         )
     ].copy()
@@ -159,14 +174,14 @@ if search_region:
     if not result.empty:
 
         st.success(
-            f"{search_region} 검색 결과: "
-            f"{len(result)}개 대학"
+            f"'{search_region}' 검색 결과: "
+            f"{len(result)}개"
         )
 
-        # 지역 검색 결과 중 상위 2개
+        # 대학교 2곳 추출
         top_two = result.head(2)
 
-        st.subheader("🏫 해당 지역 대학교 TOP 2")
+        st.subheader("🏫 추천 대학교 TOP 2")
 
         cols = st.columns(2)
 
@@ -200,6 +215,8 @@ if search_region:
 
                     if pd.notna(address) and str(address).strip():
                         st.write(f"**주소:** {address}")
+                    else:
+                        st.write("주소 정보 없음")
 
                     # 전화번호
                     phone = row.get(
@@ -230,9 +247,9 @@ if search_region:
                         )
 
         if len(top_two) < 2:
-            st.warning("검색된 대학교가 2곳보다 적습니다.")
+            st.warning("검색 결과가 2곳보다 적습니다.")
 
-        # 전체 검색 결과
+        # 전체 결과 보기
         with st.expander("📚 전체 검색 결과 보기"):
 
             st.dataframe(
@@ -242,17 +259,26 @@ if search_region:
             )
 
     else:
+
         st.warning(
             f"'{search_region}'에 해당하는 대학교가 없습니다."
         )
 
+        st.info(
+            "서울, 부산, 대전, 경기 등의 지역을 검색해 보세요."
+        )
+
 else:
-    st.info("지역을 입력하면 해당 지역 대학교 2곳이 표시됩니다.")
+
+    st.info(
+        "지역명을 입력하면 해당 지역의 대학교 2곳을 보여줍니다."
+    )
 
 
 # =========================
 # 6. 지역별 대학 분포
 # =========================
+
 st.divider()
 st.subheader("📈 지역별 대학교 분포")
 
@@ -260,11 +286,13 @@ region_count = university_df["시도명"].value_counts()
 
 st.bar_chart(region_count)
 
+
 # =========================
 # 7. 설립 형태별 분석
 # =========================
+
 st.divider()
-st.subheader("🏛️ 설립 형태별 대학 분석")
+st.subheader("🏛️ 설립 형태별 대학교 분석")
 
 establishment_count = (
     university_df["설립형태구분명"].value_counts()
@@ -272,12 +300,14 @@ establishment_count = (
 
 st.bar_chart(establishment_count)
 
+
 # =========================
-# 8. 전체 데이터
+# 8. 전체 데이터 확인
 # =========================
+
 st.divider()
 
-with st.expander("전체 대학 데이터 확인"):
+with st.expander("📚 전체 대학교 데이터 확인"):
 
     st.dataframe(
         university_df,
@@ -285,9 +315,10 @@ with st.expander("전체 대학 데이터 확인"):
         hide_index=True
     )
 
-st.caption("데이터 출처: universities.csv")
+
+st.caption(
+    "데이터 출처: universities.csv"
+)
 
 
-
-            
-                            
+                 
